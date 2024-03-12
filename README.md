@@ -1,6 +1,6 @@
 <a name="readme-top"></a>
 
-<h3 align="center">Distributed NCluster Game</h3>
+<h3 align="center">Distributed Nash Equilibrium in N-Cluster Game</h3>
 
 
 ### About The Project
