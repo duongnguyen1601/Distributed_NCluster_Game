@@ -4,11 +4,11 @@
 
 
 ### About The Project
-This project contains a simulation for finding the Nash Equilibrium for clusters of microgrids containg generators and batteries.
+This project contains a simulation for finding the Nash Equilibrium in a day-ahead microgrid energy management problem.
 
 The project contains a python script for running the simulation and a script for converting MatPower data files to define generators.
 
-The simulation finds the Nash Equilibrium for the decisions of all agents and clusters of microgrids over a set of timesteps.
+The simulation finds the Nash Equilibrium for the decisions of all agents and clusters of microgrids over a predefined time horizon.
 
 ### Usage
 
