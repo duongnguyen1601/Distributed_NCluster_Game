@@ -4,6 +4,9 @@ from Objects.Generator import Generator
 import numpy as np
 from collections import defaultdict
 from Projection_xpress import Projection
+import pickle
+import bz2
+import os
 
 
 class OptimizationProblem:
@@ -36,12 +39,18 @@ class OptimizationProblem:
 
     def SetDemandLevels(self):
         self.demandLevels = np.zeros((self.H, self.T))
-        for h in range(self.H):
+
+        if self.params.equal_demand:
             for t in range(self.T):
-                # self.demandLevels[h][t] = self.rng.choice(
-                #     self.params.demand_set)
-                self.demandLevels[h][t] = self.rng.uniform(
+                demand = self.rng.uniform(
                     self.params.demand_range[0], self.params.demand_range[1])
+                for h in range(self.H):
+                    self.demandLevels[h][t] = demand
+        else:
+            for h in range(self.H):
+                for t in range(self.T):
+                    self.demandLevels[h][t] = self.rng.uniform(
+                        self.params.demand_range[0], self.params.demand_range[1])
 
     def GetCommGraph(self):
         # Create graph
@@ -280,30 +289,35 @@ class OptimizationProblem:
         R = self.GetWeightMatrix(commGraph)
         C_dict = self.GetClusterMatricies(commGraph)
 
-        # Each row is all of the agent decisions, followed by cluster decisions, for each timestep
-        ZPrev = self.initializeZ()
-        VPrev = ZPrev.copy()
-        # This is a dictionary, key = agentId, value = vector of length, # of agents in that same cluster + 1
-        YPrev = self.getGrad(VPrev)
+        if self.params.save_state_freq > 0 and os.path.isfile("cSaveState.bz2"):
+            iter, VPrev, YPrev, ZPrev, ZHist = self.LoadCompressedState()
+            iter = iter + 1
+            errorHistZ = []
+            for i in range(len(ZHist) - 1):
+                errorHistZ.append(np.linalg.norm(ZHist[i+1] - ZHist[i]))
+        else:
+            # Each row is all of the agent decisions, followed by cluster decisions, for each timestep
+            ZPrev = self.initializeZ()
+            VPrev = ZPrev.copy()
+            # This is a dictionary, key = agentId, value = vector of length, # of agents in that same cluster + 1
+            YPrev = self.getGrad(VPrev)
 
-        # Initilize histories
-        VHist = []
-        YHist = []
-        ZHist = []
-        errorHistZ = []
-        errorHistV = []
+            # Initilize histories
+            ZHist = []
+            errorHistZ = []
+            iter = 0
 
-        for iter in range(self.params.Max_Iter):
+        for iter in range(iter, self.params.Max_Iter):
             VCur = self.VUpdate(R, ZPrev)
             YCur = self.YUpdate(C_dict, VPrev, VCur, YPrev)
             ZCur = self.ZUpdate(VCur, YCur)
-            VHist.append(VCur)
-            YHist.append(YCur)
             ZHist.append(ZCur)
 
             errorHistZ.append(np.linalg.norm(ZCur - ZPrev))
-            errorHistV.append(np.linalg.norm(VCur - VPrev))
-            print(str(errorHistZ[-1]) + "," + str(errorHistV[-1]))
+
+            if iter % 200 == 0:
+                print(str(errorHistZ[-1]) + "," +
+                      str(np.linalg.norm(VCur - VPrev)))
 
             if np.linalg.norm(ZCur) > 10**6:
                 print('Iteration is diverging. Iam going to stop iteration.')
@@ -316,28 +330,134 @@ class OptimizationProblem:
             YPrev = YCur
             ZPrev = ZCur
 
-        return VHist, ZHist, YHist, errorHistZ, errorHistV
+            if self.params.save_state_freq > 0 and iter > 0 and iter % self.params.save_state_freq == 0:
+                self.SaveCompressedState(iter, VPrev, YPrev, ZPrev, ZHist)
+
+        return ZHist, errorHistZ
+
+    def SaveCompressedState(self, iter, VPrev, YPrev, ZPrev, ZHist):
+        result_dict = {}
+        YPrevConvert = {}
+        for key, item in YPrev.items():
+            YPrevConvert[key] = item.tolist()
+
+        result_dict["YPrev"] = YPrevConvert
+        result_dict["ZPrev"] = ZPrev.tolist()
+        result_dict["VPrev"] = VPrev.tolist()
+        result_dict["iter"] = iter
+
+        pickle.dump(result_dict, bz2.open("cSaveState.bz2", "wb"))
+
+        with open("hisSaveState.pkl", "ab") as f:
+            for entry in ZHist[len(ZHist) - self.params.save_state_freq:]:
+                pickle.dump(entry.tolist(), f)
+
+    def LoadCompressedState(self):
+        with bz2.open("cSaveState.bz2", "rb") as f:
+            result_dict = pickle.load(f)
+
+        iter = result_dict["iter"]
+        ZPrev = []
+        for row in result_dict["ZPrev"]:
+            ZPrev.append(np.array(row))
+        VPrev = np.array(result_dict["VPrev"])
+        ZPrev = np.array(result_dict["ZPrev"])
+        YPrev = {}
+        for key, item in result_dict["YPrev"].items():
+            YPrev[int(key)] = np.array(item)
+
+        ZHist = []
+        with open("hisSaveState.pkl", "rb") as f:
+            for _ in range(iter):
+                z = pickle.load(f)
+                ZHist.append(np.array(z))
+
+        return iter, VPrev, YPrev, ZPrev, ZHist
+
+    def GetCostCurves(self, ZHist):
+        clusterCostCurves = {i: [] for i in range(self.H)}
+        for i in range(0, len(ZHist)):
+            clusterCosts = self.GetClusterCosts(ZHist[i])
+            for key, val in clusterCosts.items():
+                clusterCostCurves[key].append(val)
+        return clusterCostCurves
+
+    def GetClusterCosts(self, ZCur):
+        Costs = {}
+
+        # Get amount bought/sold total to the grid for every timestamp
+        gridUsageAmounts = []
+
+        for t in range(self.T):
+            gridTotal = 0
+            for h in range(self.H):
+                cluster = self.clusters[h]
+                clusterAmount = 0
+                for i, agent in enumerate(cluster):
+                    clusterAmount += self.getClusterDecision(
+                        ZCur, agent.id, h, t)
+
+                clusterAmount = clusterAmount / len(cluster)
+                gridTotal += clusterAmount
+
+            gridUsageAmounts.append(gridTotal)
+
+        for h in range(self.H):
+            cluster = self.clusters[h]
+
+            clusterTotalCost = 0
+            for t in range(self.T):
+                # Get cluster cost and sell back
+                Pg = 0
+                Ps = 0
+
+                for i, agent in enumerate(cluster):
+                    Pr = self.getAgentDecision(ZCur, agent.id, agent.id, t)
+                    Pg += self.getClusterDecision(ZCur, agent.id, h, t)
+                    Ps += self.getClusterDecision(ZCur,
+                                                  agent.id, self.H + h, t)
+                    agentCost = agent.a*Pr*Pr + \
+                        np.sign(Pr)*agent.b*Pr + agent.c
+                    clusterTotalCost += agentCost
+
+                Pg = Pg / len(cluster)
+                Ps = Ps / len(cluster)
+                gridCost = Pg * self.params.p_scaling_factor * \
+                    gridUsageAmounts[t]
+                gridSell = Ps * self.params.sell_back_rate * \
+                    self.params.p_scaling_factor * gridUsageAmounts[t]
+                clusterTotalCost += gridCost
+                clusterTotalCost -= gridSell
+
+            Costs[h] = clusterTotalCost
+
+        return Costs
 
 
 # Find the exact NE with full information
 
     def FindExactNE(self):
-        ZPrev = self.rng.rand((2*self.H + self.N) * self.T)*2
 
-        # Initialize and Project Z
-        for h in range(self.H):
-            cluster = self.clusters[h]
-            L = len(cluster) + 2
+        if self.params.save_state_freq > 0 and os.path.isfile("cSaveState_E.bz2"):
+            iter, ZPrev = self.LoadCompressedExactState()
+            ZCur = ZPrev
+            iter = iter + 1
+        else:
+            # Initialize and Project Z
+            ZPrev = self.rng.rand((2*self.H + self.N) * self.T)*5
 
-            ZPrev_h = self.CollapseExactZ(L, cluster, ZPrev, h)
+            for h in range(self.H):
+                cluster = self.clusters[h]
+                L = len(cluster) + 2
 
-            ZPrev_h = self.getProject(ZPrev_h, h)
+                ZPrev_h = self.CollapseExactZ(L, cluster, ZPrev, h)
 
-            ZPrev = self.ExpandExactZ(L, cluster, h, ZPrev_h, ZPrev)
+                ZPrev_h = self.getProject(ZPrev_h, h)
 
-        errorHist = []
+                ZPrev = self.ExpandExactZ(L, cluster, h, ZPrev_h, ZPrev)
+                iter = 0
 
-        for iter in range(self.params.Max_Iter):
+        for iter in range(iter, 2 * self.params.Max_Iter):
             # Stack the Zprev into a N row array
             ZCur = np.zeros(((2*self.H + self.N) * self.T))
             ZCur_stack = np.zeros((self.N, (2*self.H + self.N) * self.T))
@@ -359,14 +479,15 @@ class OptimizationProblem:
 
                 ZPrev_h = self.CollapseExactZ(L, cluster, ZPrev, h)
 
+                temp = ZPrev_h - self.params.alpha_NE * FCur
+
                 ZCur_h = self.getProject(
-                    ZPrev_h - self.params.alpha_NE * FCur, h)
+                    temp, h)
 
                 ZCur = self.ExpandExactZ(L, cluster, h, ZCur_h, ZCur)
 
             # Check convergence
-            errorHist.append(np.linalg.norm(ZCur - ZPrev))
-            print(errorHist[-1])
+            print(np.linalg.norm(ZCur - ZPrev))
             if np.linalg.norm(ZCur) > 10**6:
                 print('Iteration is diverging. Iam going to stop iteration.')
                 break
@@ -375,6 +496,9 @@ class OptimizationProblem:
                 print(ZCur)
                 break
             ZPrev = ZCur
+
+            if self.params.save_state_freq > 0 and iter % self.params.save_state_freq == 0:
+                self.SaveCompressedExactState(iter, ZPrev)
 
         return ZCur
 
@@ -414,3 +538,23 @@ class OptimizationProblem:
             idx_sb = t*(self.N + 2*self.H) + self.N + h + self.H
             ZPrev[idx_sb] = ZPrev_h[prev_idx_sb]
         return ZPrev
+
+    def SaveCompressedExactState(self, iter, ZPrev):
+        result_dict = {}
+
+        result_dict["ZPrev"] = ZPrev.tolist()
+        result_dict["iter"] = iter
+
+        pickle.dump(result_dict, bz2.open("cSaveState_E.bz2", "wb"))
+
+    def LoadCompressedExactState(self):
+        with bz2.open("cSaveState_E.bz2", "rb") as f:
+            result_dict = pickle.load(f)
+
+        iter = result_dict["iter"]
+        ZPrev = []
+        for row in result_dict["ZPrev"]:
+            ZPrev.append(np.array(row))
+        ZPrev = np.array(result_dict["ZPrev"])
+
+        return iter, ZPrev

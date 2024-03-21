@@ -12,6 +12,11 @@ class DistributionParameters:
     alpha: float  # Step size
     alpha_NE: float  # NE Step size
     gamma: float  # weight
+    # How many iterations between save states, if the value is 0 don't save
+    save_state_freq: int
+    # How many iterations between save states for finding exact NE, if the value is 0 don't save
+    save_state_freq_e: int
+    equal_demand: bool  # If true use the same demand for all clusters
 
     T: int  # Number of timesteps
     N: int  # Number of agents
