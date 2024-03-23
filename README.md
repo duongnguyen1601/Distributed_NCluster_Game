@@ -21,3 +21,9 @@ To utilize the simulation:
 
 ### Data Source
 For the dataset used in this project, please refer to the official repository of MATPOWER available at https://github.com/MATPOWER/matpower/tree/master/data
+
+### References
+D. T. A. Nguyen, M. Bianchi, F. Dörfler, D. T. Nguyen, and A. Nedić, "*Constrained multi-cluster game: Distributed Nash equilibrium seeking over directed graphs.*" Preprint.
+
+
+
