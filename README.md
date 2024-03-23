@@ -1,19 +1,23 @@
 <a name="readme-top"></a>
 
-<h3 align="center">Distributed Nash Equilibrium in N-Cluster Game</h3>
+<h3 align="center">Distributed Nash Equilibrium Seeking in N-Cluster Game: Day-Ahead Microgrid Energy Management</h3>
 
 
 ### About The Project
-This project contains a simulation for finding the Nash Equilibrium in a day-ahead microgrid energy management problem.
+Welcome to the Nash Equilibrium simulation project for solving day-ahead microgrid energy management problems. This project provides tools to simulate and analyze the Nash Equilibrium for decision-making among multiple agents and clusters of microgrids over a predefined time horizon.
 
-The project contains a python script for running the simulation and a script for converting MatPower data files to define generators.
+###  Features
+**Nash Equilibrium Solver:** The core of the project contains a Python script designed to run simulations and compute the Nash Equilibrium for decision-making within the microgrid environment.
 
-The simulation finds the Nash Equilibrium for the decisions of all agents and clusters of microgrids over a predefined time horizon.
+**MatPower Data Conversion:** A script is included to facilitate the conversion of MatPower data files, which define generators within the microgrid.
 
 ### Usage
+To utilize the simulation:
 
-Set parameters for the simulation and input data for the microgrids in the Test_params.json file. Distributions of possible agents can be set in the file for batteries and generators. Generator data can also be set in the Data/GenData.csv file.
-The provided data for GenData.csv was pulled from the MatPwer ACTIVSg2000.mat file using MatPowerConvertor.py
+1. Set parameters and input data for the microgrids in the **Test_params.json** file.
+2. Utilize the **Data/GenData.csv** file to specify generator data. Note: this data originates from the MatPower **ACTIVSg2000.mat** file, processed using **MatPowerConvertor.py**.
+3. Execute the simulation via **Main.py**. This will generate a **results.json** file containing the exact Nash Equilibrium values, alongside the history for the estimates Z and the errors. Additionally, convergence plots will be produced. To reload data for re-plotting, set the `LoadFromFile` parameter in **Main.py**, which will load data from **results.json** instead of rerunning the simulation.
+4. The `save_state_` parameters determine the frequency of saving the simulation state. This feature is for resuming simulations for additional iterations or recovering from unexpected crashes.
 
-The simulation is run using the Main.py file. This will output a results.json which contains the values for the exact Nash Equilibrium as well as the complete history for V, Z, Y, and the error in Z and V.
-The simulation will also about two plots of convergence. To reload the data to re-plot the parameter LoadFromFile can be set in Main.py which will load in the data from the results.json file instead of re-running the simulation.
+### Data Source
+For the dataset used in this project, please refer to the official repository of MATPOWER available at https://github.com/MATPOWER/matpower/tree/master/data
